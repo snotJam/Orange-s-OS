@@ -1,4 +1,8 @@
-;这段代码是在pmtest1上面增加了一部分
+;-----------------------------------------------------
+;因为书中有省略，所以这里的GDT是在pmtest2的基础上增加的
+;可能加的位置不正确，以后再回头改
+;
+;---------------------------------------------------
 %include "pm.inc"		;常量，宏，以及一些说明
 
 org 07c00h
@@ -15,6 +19,9 @@ LABLE_DESC_DATA:	Descriptor			0,		DataLen-1,		DA_DRW		;Data
 LABLE_DESC_STACK:	Descriptor			0,		TopOfStack,		DA_DRWA+DA_32	;stack 32位
 LABLE_DESC_TEST:	Descriptor		05000000h,	0ffffh,			DA_DRW
 LABLE_DESC_VIDEO:	Descriptor	  	0B8000h,	0ffffh,			DA_DRW		;显存首地址
+;添加的部分
+LABLE_DESC_LDT:		Descriptor			0,		LDTLen-1,		DA_LDT		;LDT
+
 ;GDT结束
 
 GdtLen	equ	$-LABLE_GDT		;GDT长度
@@ -29,11 +36,13 @@ SelectorData	equ	LABLE_DESC_DATA		-LABLE_GDT
 SelectorStack	equ	LABLE_DESC_STACK	-LABLE_GDT
 SelectorTest	equ	LABLE_DESC_TEST		-LABLE_GDT
 SelectorVideo	equ	LABLE_DESC_VIDEO	-LABLE_GDT
+;LDT
+SelectorLDT		equ	LABLE_DESC_LDT		-LABLE_GDT
 ;end of [SECTION .gdt]
 
 [SECTION .data1]	;数据段
 	ALIGN	32
-	[BIT 32]
+	[BITS 32]
 	LABLE_DATA:
 		SPValueInRealMode	dw	0
 		;字符串
@@ -47,7 +56,7 @@ SelectorVideo	equ	LABLE_DESC_VIDEO	-LABLE_GDT
 ;全局堆栈段
 [SECTION .gs]		
 	ALIGN	32
-	[BIT 32]
+	[BITS 32]
 	LABLE_STACK:
 		times 512 db 0
 	TopOfStack		equ 	$-LABLE_STACK-1
@@ -128,6 +137,41 @@ LABLE_SEG_CODE32:
 	
 	;到此停止
 	jmp SelectorCode16:0		;跳到.s16Code
+;load LDT
+	mov ax,SelectorLDT
+	lldt ax						;加载ldt
+	
+	jmp SelectorLDTCodeA:0		;跳入局部任务
+	
+;----------------------------------------
+[SECTION .ldt]
+ALIGN 32
+LABLE_LDT:
+;												段基址		段界限		  属性
+LABLE_LDT_DESC_CODEA:			Descriptor			0,	CodeALen-1,		DA_C+DA_32		;code，32位
+LDTLen		equ		$-LABLE_LDT
+
+;LDT选择子
+SelectorLDTCodeA	equ	LABLE_LDT_DESC_CODEA	-LABLE_GDT+SA_TIL
+;END of [SECTION .ldt]
+
+;CodeA (LDT32位代码段)
+[SECTION .la]
+ALIGN 32
+[BITS 32]
+LABLE_CODE_A:
+	mov ax,SelectorVideo
+	mov gs,ax
+	
+	mov edi,(80*12+0)*2
+	mov ah,0Ch
+	mov al,'L'
+	mov [gs:edi],ax
+	
+	;准备由16位代码段跳回实模式
+	jmp SelectorCode16:0
+CodeALen	equ	$-LABLE_CODE_A
+;END of [SECTION .la]
 ;------------------------------------
 TestRead:
 	xor	esi,esi
@@ -221,6 +265,26 @@ DispReturn:
 ALIGN 32
 [BITS 16]
 LABLE_SEG_CODE16:
+	;初始化LDT在GDT中的描述符
+	xor eax,eax
+	mov ax,ds
+	shl eax,4
+	add eax,LABLE_LDT
+	mov word [LABLE_DESC_LDT+2],ax
+	shr eax,16
+	mov byte [LABLE_DESC_LDT+4],al
+	mov byte [LABLE_DESC_LDT+7],ah
+	
+	;初始化LDT中的描述符
+	xor eax,eax
+	mov ax,ds
+	shl eax,4
+	add eax,LABLE_CODE_A
+	mov word [LABLE_LDT_DESC_CODEA+2],ax
+	shr eax,16
+	mov byte [LABLE_LDT_DESC_CODEA+4],al
+	mov byte [LABLE_LDT_DESC_CODEA+7],ah
+	
 	;跳回实模式
 	mov ax,SelectorNormal
 	mov ds,ax
@@ -238,4 +302,3 @@ LABLE_GO_BACK_TO_REAL:
 Code16Len	equ		$-LABLE_SEG_CODE16
 ;END OF [SECTION .s16Code]
 
-	

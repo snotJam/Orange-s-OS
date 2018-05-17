@@ -41,9 +41,9 @@ LABLE_BEGIN:
 	mov ax,cs
 	shl eax,4
 	add eax,LABLE_DESC_CODE32
-	mov word [LABLE_DESC_CODE32+2],ax
+	mov word [LABLE_DESC_CODE32+2],ax		;word，一个字，也就是2个字节，16位
 	mov eax,16
-	mov byte [LABLE_DESC_CODE32+4],al
+	mov byte [LABLE_DESC_CODE32+4],al		;byte，一个字节，8位
 	mov byte [LABLE_DESC_CODE32+7],ah
 	
 	;为加载GDTR作准备
@@ -51,7 +51,7 @@ LABLE_BEGIN:
 	mov ax,ds
 	shl eax,4
 	add eax,LABLE_GDT		;eax<-gdt基地址
-	mov dword [GdtPtr+2],eax	;GdtPtr+2<-gdt基地址
+	mov dword [GdtPtr+2],eax	;GdtPtr+2<-gdt基地址		;dword，两个字，32位
 	
 	;加载GDTR
 	lgdt [GdtPtr]
@@ -64,7 +64,7 @@ LABLE_BEGIN:
 	or al,00000010b
 	out 92h,al
 	
-	;准备切换到保护模式
+	;准备切换到保护模式,下面的代码会将cr0段的PE位置为1，表示进入保护模式
 	mov eax,cr0
 	or eax,l
 	mov cr0,eax
