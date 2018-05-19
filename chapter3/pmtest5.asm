@@ -1,8 +1,7 @@
-;-----------------------------------------------------
-;因为书中有省略，所以这里的GDT是在pmtest2的基础上增加的
-;可能加的位置不正确，以后再回头改
-;
-;---------------------------------------------------
+;--------------------------
+;在pmtest4基础上做修改
+;实现有高特权级向低特权级转换
+;---------------------------
 %include "pm.inc"		;常量，宏，以及一些说明
 
 org 07c00h
@@ -19,23 +18,34 @@ LABLE_DESC_DATA:	Descriptor			0,		DataLen-1,		DA_DRW		;Data
 LABLE_DESC_STACK:	Descriptor			0,		TopOfStack,		DA_DRWA+DA_32	;stack 32位
 LABLE_DESC_TEST:	Descriptor		05000000h,	0ffffh,			DA_DRW
 LABLE_DESC_VIDEO:	Descriptor	  	0B8000h,	0ffffh,			DA_DRW		;显存首地址
-;添加的部分
+;LDT
 LABLE_DESC_LDT:		Descriptor			0,		LDTLen-1,		DA_LDT		;LDT
-
+;
+LABLE_DESC_CODE_DEST：Descriptor 		0,	SelectorCodeDest-1,	DA_C+DA_32	;非一致代码段	
+;									目标选择子				  偏移		 Dcount，	 属性
+LABLE_CALL_GATE_TEST:	Gate		SelectorCodeDest,			0,			0,		DA_386CGate+DA_DPL0
 ;GDT结束
+
+
+;再对照前面的Descriptor，我们发现还是有点不一样的，门中的是选择子。不是直接的段。
+;参考上面的理解，定义一个变量，比如LABLE_NORMAL，变量值是段描述符，这个描述符类型的名称是Descriptor，后面是赋值
+;同理，这里变量LABLE_CALL_GATE_TEST，值是Gate类型，后面是Gate内部的属性值
 
 GdtLen	equ	$-LABLE_GDT		;GDT长度
 GdtPtr	dw	GdtLen-1		;GDT界限
 		dd	0				;GDT基地址
 
 ;GDT选择子
-SelectorNormal	equ	LABLE_DESC_CODE32	-LABLE_GDT
-SelectorCode32	equ	LABLE_DESC_CODE32	-LABLE_GDT
-SelectorCode16	equ	LABLE_DESC_CODE16	-LABLE_GDT
-SelectorData	equ	LABLE_DESC_DATA		-LABLE_GDT
-SelectorStack	equ	LABLE_DESC_STACK	-LABLE_GDT
-SelectorTest	equ	LABLE_DESC_TEST		-LABLE_GDT
-SelectorVideo	equ	LABLE_DESC_VIDEO	-LABLE_GDT
+SelectorNormal		equ	LABLE_DESC_CODE32	-LABLE_GDT
+SelectorCode32		equ	LABLE_DESC_CODE32	-LABLE_GDT
+SelectorCode16		equ	LABLE_DESC_CODE16	-LABLE_GDT
+SelectorData		equ	LABLE_DESC_DATA		-LABLE_GDT
+SelectorStack		equ	LABLE_DESC_STACK	-LABLE_GDT
+SelectorTest		equ	LABLE_DESC_TEST		-LABLE_GDT
+SelectorVideo		equ	LABLE_DESC_VIDEO	-LABLE_GDT
+;测试调用门
+SelectorCodeDest	equ	LABLE_SEG_CODE_DEST	-LABLE_GDT
+SelectorCallGateTest	equ	LABLE_CALL_GATE_TEST	-LABLE_GDT
 ;LDT
 SelectorLDT		equ	LABLE_DESC_LDT		-LABLE_GDT
 ;end of [SECTION .gdt]
@@ -93,6 +103,16 @@ LABEL_BEGIN:
 	shr	eax, 16
 	mov	byte [LABEL_DESC_CODE32 + 4], al
 	mov	byte [LABEL_DESC_CODE32 + 7], ah
+
+	; 初始化测试调用门的代码段描述符
+	xor	eax, eax
+	mov	ax, cs
+	shl	eax, 4
+	add	eax, LABEL_SEG_CODE_DEST
+	mov	word [LABEL_DESC_CODE_DEST + 2], ax
+	shr	eax, 16
+	mov	byte [LABEL_DESC_CODE_DEST + 4], al
+	mov	byte [LABEL_DESC_CODE_DEST + 7], ah
 
 	; 初始化数据段描述符
 	xor	eax, eax
@@ -159,7 +179,7 @@ LABEL_BEGIN:
 
 	; 真正进入保护模式
 	jmp	dword SelectorCode32:0	; 执行这一句会把 SelectorCode32 装入 cs, 并跳转到 Code32Selector:0  处
-										
+
 
 ;在跳回实模式后，将重置各寄存器的值，恢复sp（堆栈寄存器）的值，关闭A20，打开中断，回到原来的样子
 LABLE_REAL_ENTRY:
@@ -208,10 +228,17 @@ LABLE_SEG_CODE32:
 	add edi,2
 	jmp .1
 .2:			;显示完毕
-	call DispReturn
-	call TestRead
-	call TestWrite
-	call TestRead
+	call	DispReturn
+
+	; 测试调用门（无特权级变换），将打印字母 'C'
+	call	SelectorCallGateTest:0
+	;call	SelectorCodeDest:0
+
+	; Load LDT
+	mov	ax, SelectorLDT
+	lldt	ax
+
+	jmp	SelectorLDTCodeA:0	; 跳入局部任务，将打印字母 'L'。
 	
 	;到此停止
 	jmp SelectorCode16:0		;跳到.s16Code
@@ -379,4 +406,24 @@ LABLE_GO_BACK_TO_REAL:
 	jmp 0:LABLE_REAL_ENTRY		;段地址在程序开始处被设置为正确的值
 Code16Len	equ		$-LABLE_SEG_CODE16
 ;END OF [SECTION .s16Code]
+;---------------------------------------
+;调用门目标段
+[SECTION .sdest]
+[BITS 32]
+LABLE_SEG_CODE_DEST:
+	;jmp $
+	mov ax,SelectorVideo
+	mov gs,ax				
+	
+	mov edi,(80*12+0)*2		
+	mov ah,0ch				
+	mov al,'c'
+	mov [gs:edi],ax			;暂时不是很懂，记得是要在屏幕上显示一个字符c
+	
+	
+	
+	retf					;打算用call指令去调用将要建立调用门，所以结尾调用retf指令
 
+	
+SegCodeDestLen equ $-LABLE_SEG_CODE_DEST
+;END of [SECTION .sdest]

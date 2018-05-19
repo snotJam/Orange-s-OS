@@ -1,7 +1,7 @@
-;这段代码是在pmtest1上面增加了一部分
+;这段代码是在pmtest1上面修改了一部分
 %include "pm.inc"		;常量，宏，以及一些说明
 
-org 07c00h
+org 0100h
 	jmp LABLE_BEGIN
 	
 [SECTION .gdt]
@@ -53,16 +53,87 @@ SelectorVideo	equ	LABLE_DESC_VIDEO	-LABLE_GDT
 	TopOfStack		equ 	$-LABLE_STACK-1
 ;END of [SECTION .gs]
 
-mov ax,cs
-mov ds,ax
-mov es,ax
-mov ss,ax
-mov sp,0100h
-mov [LABLE_GO_BACK_TO_REAL+3],ax		;LABLE_GO_BACK_TO_REAL+3刚好是Segment的地址
+[SECTION .s16]
+[BITS	16]
+LABEL_BEGIN:
+	mov	ax, cs
+	mov	ds, ax
+	mov	es, ax
+	mov	ss, ax
+	mov	sp, 0100h
+
+	mov	[LABEL_GO_BACK_TO_REAL+3], ax	;LABLE_GO_BACK_TO_REAL+3刚好是Segment的地址
 										;此处先将cs值给了ax，最后又将ax中的值给了Segment，也就是此时segment地址为cs值
 										;那么代码jmp 0,LABLE_REAL_ENTRY就变成了jmp cs_real_mode:LABLE_REAL_ENTRY
 										;将跳到标号LABLE_REAL_ENTRY处
-										
+	mov	[SPValueInRealMode], sp
+
+	; 初始化 16 位代码段描述符
+	mov	ax, cs
+	movzx	eax, ax
+	shl	eax, 4
+	add	eax, LABEL_SEG_CODE16
+	mov	word [LABEL_DESC_CODE16 + 2], ax
+	shr	eax, 16
+	mov	byte [LABEL_DESC_CODE16 + 4], al
+	mov	byte [LABEL_DESC_CODE16 + 7], ah
+
+	; 初始化 32 位代码段描述符
+	xor	eax, eax
+	mov	ax, cs
+	shl	eax, 4
+	add	eax, LABEL_SEG_CODE32
+	mov	word [LABEL_DESC_CODE32 + 2], ax
+	shr	eax, 16
+	mov	byte [LABEL_DESC_CODE32 + 4], al
+	mov	byte [LABEL_DESC_CODE32 + 7], ah
+
+	; 初始化数据段描述符
+	xor	eax, eax
+	mov	ax, ds
+	shl	eax, 4
+	add	eax, LABEL_DATA
+	mov	word [LABEL_DESC_DATA + 2], ax
+	shr	eax, 16
+	mov	byte [LABEL_DESC_DATA + 4], al
+	mov	byte [LABEL_DESC_DATA + 7], ah
+
+	; 初始化堆栈段描述符
+	xor	eax, eax
+	mov	ax, ds
+	shl	eax, 4
+	add	eax, LABEL_STACK
+	mov	word [LABEL_DESC_STACK + 2], ax
+	shr	eax, 16
+	mov	byte [LABEL_DESC_STACK + 4], al
+	mov	byte [LABEL_DESC_STACK + 7], ah
+
+	; 为加载 GDTR 作准备
+	xor	eax, eax
+	mov	ax, ds
+	shl	eax, 4
+	add	eax, LABEL_GDT		; eax <- gdt 基地址
+	mov	dword [GdtPtr + 2], eax	; [GdtPtr + 2] <- gdt 基地址
+
+	; 加载 GDTR
+	lgdt	[GdtPtr]
+
+	; 关中断
+	cli
+
+	; 打开地址线A20
+	in	al, 92h
+	or	al, 00000010b
+	out	92h, al
+
+	; 准备切换到保护模式
+	mov	eax, cr0
+	or	eax, 1
+	mov	cr0, eax
+
+	; 真正进入保护模式
+	jmp	dword SelectorCode32:0	; 执行这一句会把 SelectorCode32 装入 cs, 并跳转到 Code32Selector:0  处
+											
 
 ;初始化段描述符
 xor	eax,eax
