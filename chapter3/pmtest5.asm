@@ -5,71 +5,71 @@
 %include "pm.inc"		;常量，宏，以及一些说明
 
 org 07c00h
-	jmp LABLE_BEGIN
+	jmp LABEL_BEGIN
 	
 [SECTION .gdt]
 ;GDT
 ;									段地址		段界限		  属性
-LABLE_GDT:			Descriptor			0,			0,			0		;空描述符
-LABLE_NORMAL:		Descriptor			0,		0ffffh,			DA_DRW		;Normal描述符
-LABLE_DESC_CODE32:	Descriptor			0,	SegCode32Len-1,		DA_C+DA_32	;非一致代码段 32
-LABLE_DESC_CODE16:	Descriptor			0,		0ffffh,			DA_C		;非一致代码段 16
-LABLE_DESC_DATA:	Descriptor			0,		DataLen-1,		DA_DRW		;Data
-LABLE_DESC_STACK:	Descriptor			0,		TopOfStack,		DA_DRWA+DA_32	;stack 32位
-LABLE_DESC_TEST:	Descriptor		05000000h,	0ffffh,			DA_DRW
-LABLE_DESC_VIDEO:	Descriptor	  	0B8000h,	0ffffh,			DA_DRW		;显存首地址
+LABEL_GDT:			Descriptor			0,			0,			0		;空描述符
+LABEL_NORMAL:		Descriptor			0,		0ffffh,			DA_DRW		;Normal描述符
+LABEL_DESC_CODE32:	Descriptor			0,	SegCode32Len-1,		DA_C+DA_32	;非一致代码段 32
+LABEL_DESC_CODE16:	Descriptor			0,		0ffffh,			DA_C		;非一致代码段 16
+LABEL_DESC_DATA:	Descriptor			0,		DataLen-1,		DA_DRW		;Data
+LABEL_DESC_STACK:	Descriptor			0,		TopOfStack,		DA_DRWA+DA_32	;stack 32位
+LABEL_DESC_TEST:	Descriptor		05000000h,	0ffffh,			DA_DRW
+LABEL_DESC_VIDEO:	Descriptor	  	0B8000h,	0ffffh,			DA_DRW		;显存首地址
 ;LDT
-LABLE_DESC_LDT:		Descriptor			0,		LDTLen-1,		DA_LDT		;LDT
+LABEL_DESC_LDT:		Descriptor			0,		LDTLen-1,		DA_LDT		;LDT
 ;
-LABLE_DESC_CODE_DEST：Descriptor 		0,	SelectorCodeDest-1,	DA_C+DA_32	;非一致代码段	
+LABEL_DESC_CODE_DEST：Descriptor 		0,	SelectorCodeDest-1,	DA_C+DA_32	;非一致代码段	
 ;									目标选择子				  偏移		 Dcount，	 属性
-LABLE_CALL_GATE_TEST:	Gate		SelectorCodeDest,			0,			0,		DA_386CGate+DA_DPL0
+LABEL_CALL_GATE_TEST:	Gate		SelectorCodeDest,			0,			0,		DA_386CGate+DA_DPL0
 ;GDT结束
 
 
 ;再对照前面的Descriptor，我们发现还是有点不一样的，门中的是选择子。不是直接的段。
-;参考上面的理解，定义一个变量，比如LABLE_NORMAL，变量值是段描述符，这个描述符类型的名称是Descriptor，后面是赋值
-;同理，这里变量LABLE_CALL_GATE_TEST，值是Gate类型，后面是Gate内部的属性值
+;参考上面的理解，定义一个变量，比如LABEL_NORMAL，变量值是段描述符，这个描述符类型的名称是Descriptor，后面是赋值
+;同理，这里变量LABEL_CALL_GATE_TEST，值是Gate类型，后面是Gate内部的属性值
 
-GdtLen	equ	$-LABLE_GDT		;GDT长度
+GdtLen	equ	$-LABEL_GDT		;GDT长度
 GdtPtr	dw	GdtLen-1		;GDT界限
 		dd	0				;GDT基地址
 
 ;GDT选择子
-SelectorNormal		equ	LABLE_DESC_CODE32	-LABLE_GDT
-SelectorCode32		equ	LABLE_DESC_CODE32	-LABLE_GDT
-SelectorCode16		equ	LABLE_DESC_CODE16	-LABLE_GDT
-SelectorData		equ	LABLE_DESC_DATA		-LABLE_GDT
-SelectorStack		equ	LABLE_DESC_STACK	-LABLE_GDT
-SelectorTest		equ	LABLE_DESC_TEST		-LABLE_GDT
-SelectorVideo		equ	LABLE_DESC_VIDEO	-LABLE_GDT
+SelectorNormal		equ	LABEL_DESC_CODE32	-LABEL_GDT
+SelectorCode32		equ	LABEL_DESC_CODE32	-LABEL_GDT
+SelectorCode16		equ	LABEL_DESC_CODE16	-LABEL_GDT
+SelectorData		equ	LABEL_DESC_DATA		-LABEL_GDT
+SelectorStack		equ	LABEL_DESC_STACK	-LABEL_GDT
+SelectorTest		equ	LABEL_DESC_TEST		-LABEL_GDT
+SelectorVideo		equ	LABEL_DESC_VIDEO	-LABEL_GDT
 ;测试调用门
-SelectorCodeDest	equ	LABLE_SEG_CODE_DEST	-LABLE_GDT
-SelectorCallGateTest	equ	LABLE_CALL_GATE_TEST	-LABLE_GDT
+SelectorCodeDest	equ	LABEL_SEG_CODE_DEST	-LABEL_GDT
+SelectorCallGateTest	equ	LABEL_CALL_GATE_TEST	-LABEL_GDT
 ;LDT
-SelectorLDT		equ	LABLE_DESC_LDT		-LABLE_GDT
+SelectorLDT		equ	LABEL_DESC_LDT		-LABEL_GDT
 ;end of [SECTION .gdt]
 
 [SECTION .data1]	;数据段
 	ALIGN	32
 	[BITS 32]
-	LABLE_DATA:
+	LABEL_DATA:
 		SPValueInRealMode	dw	0
 		;字符串
 		PMMessage:			db "In Project Mode now ^-^", 0		;在保护模式中显示
 		OffsetPMMessage		equ	PMMessage-$$
 		StrTest:			db	"ABCDEFGHIJKLMN",0
 		OffsetStrTest		equ	StrTest-$$
-		DataLen				equ	$-LABLE_DATA
+		DataLen				equ	$-LABEL_DATA
 ;END of [SECTION .data1]
 
 ;全局堆栈段
 [SECTION .gs]		
 	ALIGN	32
 	[BITS 32]
-	LABLE_STACK:
+	LABEL_STACK:
 		times 512 db 0
-	TopOfStack		equ 	$-LABLE_STACK-1
+	TopOfStack		equ 	$-LABEL_STACK-1
 ;END of [SECTION .gs]
 
 [SECTION .s16]
@@ -182,7 +182,7 @@ LABEL_BEGIN:
 
 
 ;在跳回实模式后，将重置各寄存器的值，恢复sp（堆栈寄存器）的值，关闭A20，打开中断，回到原来的样子
-LABLE_REAL_ENTRY:
+LABEL_REAL_ENTRY:
 	mov ax,cs
 	mov es,ax
 	mov ss,ax
@@ -201,7 +201,7 @@ LABLE_REAL_ENTRY:
 ;32位代码段
 [SECTION .s32]		
 [BITS 32]
-LABLE_SEG_CODE32:
+LABEL_SEG_CODE32:
 	mov ax,SelectorData		;mov指令将数据从后者传递到前者
 	mov ds,ax
 	mov ax,SelectorTest
@@ -251,20 +251,20 @@ LABLE_SEG_CODE32:
 ;----------------------------------------
 [SECTION .ldt]
 ALIGN 32
-LABLE_LDT:
+LABEL_LDT:
 ;												段基址		段界限		  属性
-LABLE_LDT_DESC_CODEA:			Descriptor			0,	CodeALen-1,		DA_C+DA_32		;code，32位
-LDTLen		equ		$-LABLE_LDT
+LABEL_LDT_DESC_CODEA:			Descriptor			0,	CodeALen-1,		DA_C+DA_32		;code，32位
+LDTLen		equ		$-LABEL_LDT
 
 ;LDT选择子
-SelectorLDTCodeA	equ	LABLE_LDT_DESC_CODEA	-LABLE_GDT+SA_TIL
+SelectorLDTCodeA	equ	LABEL_LDT_DESC_CODEA	-LABEL_GDT+SA_TIL
 ;END of [SECTION .ldt]
 
 ;CodeA (LDT32位代码段)
 [SECTION .la]
 ALIGN 32
 [BITS 32]
-LABLE_CODE_A:
+LABEL_CODE_A:
 	mov ax,SelectorVideo
 	mov gs,ax
 	
@@ -275,7 +275,7 @@ LABLE_CODE_A:
 	
 	;准备由16位代码段跳回实模式
 	jmp SelectorCode16:0
-CodeALen	equ	$-LABLE_CODE_A
+CodeALen	equ	$-LABEL_CODE_A
 ;END of [SECTION .la]
 ;------------------------------------
 TestRead:
@@ -369,26 +369,26 @@ DispReturn:
 [SECTION .s16code]
 ALIGN 32
 [BITS 16]
-LABLE_SEG_CODE16:
+LABEL_SEG_CODE16:
 	;初始化LDT在GDT中的描述符
 	xor eax,eax
 	mov ax,ds
 	shl eax,4
-	add eax,LABLE_LDT
-	mov word [LABLE_DESC_LDT+2],ax
+	add eax,LABEL_LDT
+	mov word [LABEL_DESC_LDT+2],ax
 	shr eax,16
-	mov byte [LABLE_DESC_LDT+4],al
-	mov byte [LABLE_DESC_LDT+7],ah
+	mov byte [LABEL_DESC_LDT+4],al
+	mov byte [LABEL_DESC_LDT+7],ah
 	
 	;初始化LDT中的描述符
 	xor eax,eax
 	mov ax,ds
 	shl eax,4
-	add eax,LABLE_CODE_A
-	mov word [LABLE_LDT_DESC_CODEA+2],ax
+	add eax,LABEL_CODE_A
+	mov word [LABEL_LDT_DESC_CODEA+2],ax
 	shr eax,16
-	mov byte [LABLE_LDT_DESC_CODEA+4],al
-	mov byte [LABLE_LDT_DESC_CODEA+7],ah
+	mov byte [LABEL_LDT_DESC_CODEA+4],al
+	mov byte [LABEL_LDT_DESC_CODEA+7],ah
 	
 	;跳回实模式
 	mov ax,SelectorNormal
@@ -402,15 +402,15 @@ LABLE_SEG_CODE16:
 	and al,11111110b
 	mov cr0,eax
 	
-LABLE_GO_BACK_TO_REAL:
-	jmp 0:LABLE_REAL_ENTRY		;段地址在程序开始处被设置为正确的值
-Code16Len	equ		$-LABLE_SEG_CODE16
+LABEL_GO_BACK_TO_REAL:
+	jmp 0:LABEL_REAL_ENTRY		;段地址在程序开始处被设置为正确的值
+Code16Len	equ		$-LABEL_SEG_CODE16
 ;END OF [SECTION .s16Code]
 ;---------------------------------------
 ;调用门目标段
 [SECTION .sdest]
 [BITS 32]
-LABLE_SEG_CODE_DEST:
+LABEL_SEG_CODE_DEST:
 	;jmp $
 	mov ax,SelectorVideo
 	mov gs,ax				
@@ -425,5 +425,5 @@ LABLE_SEG_CODE_DEST:
 	retf					;打算用call指令去调用将要建立调用门，所以结尾调用retf指令
 
 	
-SegCodeDestLen equ $-LABLE_SEG_CODE_DEST
+SegCodeDestLen equ $-LABEL_SEG_CODE_DEST
 ;END of [SECTION .sdest]
