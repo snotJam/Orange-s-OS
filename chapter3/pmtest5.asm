@@ -17,13 +17,19 @@ LABEL_DESC_CODE16:	Descriptor			0,		0ffffh,			DA_C		;非一致代码段 16
 LABEL_DESC_DATA:	Descriptor			0,		DataLen-1,		DA_DRW		;Data
 LABEL_DESC_STACK:	Descriptor			0,		TopOfStack,		DA_DRWA+DA_32	;stack 32位
 LABEL_DESC_TEST:	Descriptor		05000000h,	0ffffh,			DA_DRW
-LABEL_DESC_VIDEO:	Descriptor	  	0B8000h,	0ffffh,			DA_DRW		;显存首地址
+LABEL_DESC_VIDEO:	Descriptor	  	0B8000h,	0ffffh,			DA_DRW+DA_DPL3	;显存首地址
 ;LDT
 LABEL_DESC_LDT:		Descriptor			0,		LDTLen-1,		DA_LDT		;LDT
 ;
 LABEL_DESC_CODE_DEST：Descriptor 		0,	SelectorCodeDest-1,	DA_C+DA_32	;非一致代码段	
-;									目标选择子				  偏移		 Dcount，	 属性
-LABEL_CALL_GATE_TEST:	Gate		SelectorCodeDest,			0,			0,		DA_386CGate+DA_DPL0
+;ring3代码段和堆栈段
+LABEL_DESC_CODE_RING3:	Descriptor		0,	SegCodeRing3Len-1,	DA_C+DA_32+DA_DPL3
+LABEL_DESC_STACK3:		Descriptor		0,	TopOfStack3,		DA_DRWA+DA_32+DA_DPL3
+;TSS
+LABEL_DESC_TSS:		Descriptor			0,		TSSLen-1,		DA_386TSS
+;门									目标选择子				  偏移		 Dcount，	 属性
+LABEL_CALL_GATE_TEST:	Gate		SelectorCodeDest,			0,			0,		DA_386CGate+DA_DPL3
+		
 ;GDT结束
 
 
@@ -43,9 +49,12 @@ SelectorData		equ	LABEL_DESC_DATA		-LABEL_GDT
 SelectorStack		equ	LABEL_DESC_STACK	-LABEL_GDT
 SelectorTest		equ	LABEL_DESC_TEST		-LABEL_GDT
 SelectorVideo		equ	LABEL_DESC_VIDEO	-LABEL_GDT
+SelectorCodeRing3	equ	LABEL_DESC_CODE_RING3-LABEL_GDT+SA_RPL3
+SelectorStack3		equ	LABEL_DESC_STACK3	-LABEL_GDT+SA_RPL3
+SelectorTss			equ	LABEL_DESC_TSS		-LABEL_GDT
 ;测试调用门
 SelectorCodeDest	equ	LABEL_SEG_CODE_DEST	-LABEL_GDT
-SelectorCallGateTest	equ	LABEL_CALL_GATE_TEST	-LABEL_GDT
+SelectorCallGateTest	equ	LABEL_CALL_GATE_TEST	-LABEL_GDT+SA_RPL3
 ;LDT
 SelectorLDT		equ	LABEL_DESC_LDT		-LABEL_GDT
 ;end of [SECTION .gdt]
@@ -56,7 +65,12 @@ SelectorLDT		equ	LABEL_DESC_LDT		-LABEL_GDT
 	LABEL_DATA:
 		SPValueInRealMode	dw	0
 		;字符串
-		PMMessage:			db "In Project Mode now ^-^", 0		;在保护模式中显示
+		PMMessage:			db "In protect Mode now ^-^", 0		;在保护模式中显示
+		push SelectorStack3										;这里是按照书上说的写的，但是和源码不太一样
+		push TopOfStack3
+		push SelectorCodeRing3
+		push 0
+		retf
 		OffsetPMMessage		equ	PMMessage-$$
 		StrTest:			db	"ABCDEFGHIJKLMN",0
 		OffsetStrTest		equ	StrTest-$$
@@ -71,6 +85,52 @@ SelectorLDT		equ	LABEL_DESC_LDT		-LABEL_GDT
 		times 512 db 0
 	TopOfStack		equ 	$-LABEL_STACK-1
 ;END of [SECTION .gs]
+
+;堆栈段ring3
+[SECTION .s3]
+ALIGN 32
+[BITS 32]
+LABEL_STACK3:
+	times 512 db 0
+TopOfStack3		equ		$-LABEL_STACK3-1
+;End of [SECTION .s3]
+;Tss
+[SECTION .tss]
+ALIGN 32
+[BITS 32]
+LABEL_TSS:
+	DD 	0					;Back
+	DD	TopOfStack			;0级堆栈
+	DD 	SelectorStack		
+	DD	0					;1级堆栈
+	DD	0	
+	DD	0					;2级堆栈
+	DD	0					
+	DD	0					;CR3
+	DD	0					;EIP
+	DD	0					;EFLAGS
+	DD	0					;EAX
+	DD	0					;ECX
+	DD	0					;EDX
+	DD	0					;EBX
+	DD	0					;ESP
+	DD	0					;EBP
+	DD	0					;ESI
+	DD	0					;EDI
+	DD	0					;ES
+	DD	0					;CS
+	DD	0					;SS
+	DD	0					;DS
+	DD	0					;FS
+	DD	0					;GS
+	DD	0					;LDT
+	DD	0					;调试陷阱标志
+	DW	$-LABEL_TSS+2		;I/O位图基址
+	DB  0ffh				;I/O位图结束标志
+TSSLen		equ 	$-LABEL_TSS
+
+	
+
 
 [SECTION .s16]
 [BITS	16]
@@ -231,11 +291,11 @@ LABEL_SEG_CODE32:
 	call	DispReturn
 
 	; 测试调用门（无特权级变换），将打印字母 'C'
-	call	SelectorCallGateTest:0
+	;call	SelectorCallGateTest:0
 	;call	SelectorCodeDest:0
 
 	; Load LDT
-	mov	ax, SelectorLDT
+	mov	ax, SelectorTss
 	lldt	ax
 
 	jmp	SelectorLDTCodeA:0	; 跳入局部任务，将打印字母 'L'。
@@ -366,6 +426,24 @@ DispReturn:
 	ret
 ;DispReturn结束----------------------
 
+;CodeRing3
+[SECTION .ring3]
+ALIGN 32
+[BITS 32]
+LABEL_CODE_RING3:
+	mov ax,SelectorVideo
+	mov gs,ax
+	
+	mov edi,(80*14+0)*2
+	mov ah,0Ch
+	mov al,'3'
+	mov [gs:edi],ax
+	;调用门
+	call SelectorCallGateTest:0
+	jmp $
+SegCodeRing3Len equ $-LABEL_CODE_RING3
+;END of [SECTION .ring3]
+
 [SECTION .s16code]
 ALIGN 32
 [BITS 16]
@@ -420,9 +498,13 @@ LABEL_SEG_CODE_DEST:
 	mov al,'c'
 	mov [gs:edi],ax			;暂时不是很懂，记得是要在屏幕上显示一个字符c
 	
+	;load LDT
+	mov ax,SelectorLDT
+	lldt ax
 	
+	jmp SelectorLDTCodeA:0
 	
-	retf					;打算用call指令去调用将要建立调用门，所以结尾调用retf指令
+	;retf					;打算用call指令去调用将要建立调用门，所以结尾调用retf指令
 
 	
 SegCodeDestLen equ $-LABEL_SEG_CODE_DEST
