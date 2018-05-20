@@ -9,21 +9,25 @@ org 07c00h
 	
 [SECTION .gdt]
 ;GDT
-;									段地址		段界限		  属性
-LABEL_GDT:			Descriptor			0,			0,			0		;空描述符
-LABEL_NORMAL:		Descriptor			0,		0ffffh,			DA_DRW		;Normal描述符
-LABEL_DESC_CODE32:	Descriptor			0,	SegCode32Len-1,		DA_C+DA_32	;非一致代码段 32
-LABEL_DESC_CODE16:	Descriptor			0,		0ffffh,			DA_C		;非一致代码段 16
-LABEL_DESC_DATA:	Descriptor			0,		DataLen-1,		DA_DRW		;Data
-LABEL_DESC_STACK:	Descriptor			0,		TopOfStack,		DA_DRWA+DA_32	;stack 32位
-LABEL_DESC_TEST:	Descriptor		05000000h,	0ffffh,			DA_DRW
-LABEL_DESC_VIDEO:	Descriptor	  	0B8000h,	0ffffh,			DA_DRW		;显存首地址
+;					段地址		段界限		属性
+LABEL_GDT:		Descriptor	0,		0,		0		;空描述符
+LABEL_NORMAL:		Descriptor	0,		0ffffh,		DA_DRW		;Normal描述符
+LABEL_DESC_CODE32:	Descriptor	0,	SegCode32Len-1,		DA_C+DA_32	;非一致代码段 32
+LABEL_DESC_CODE16:	Descriptor	0,		0ffffh,		DA_C		;非一致代码段 16
+LABEL_DESC_DATA:	Descriptor	0,		DataLen-1,	DA_DRW		;Data
+LABEL_DESC_STACK:	Descriptor	0,		TopOfStack,	DA_DRWA+DA_32	;stack 32位
+LABEL_DESC_TEST:	Descriptor	05000000h,	0ffffh,		DA_DRW
+LABEL_DESC_VIDEO:	Descriptor	0B8000h,	0ffffh,		DA_DRW+DA_DPL3		;显存首地址
 ;LDT
-LABEL_DESC_LDT:		Descriptor			0,		LDTLen-1,		DA_LDT		;LDT
+LABEL_DESC_LDT:		Descriptor	0,		LDTLen-1,		DA_LDT		;LDT
 ;
-LABEL_DESC_CODE_DEST：Descriptor 		0,	SelectorCodeDest-1,	DA_C+DA_32	;非一致代码段	
-;									目标选择子				  偏移		 Dcount，	 属性
-LABEL_CALL_GATE_TEST:	Gate		SelectorCodeDest,			0,			0,		DA_386CGate+DA_DPL0
+LABEL_DESC_CODE_DEST：	Descriptor 	0,	SelectorCodeDest-1,	DA_C+DA_32	;非一致代码段	
+;添加ring3代码段和堆栈
+LABEL_DESC_CODE_RING3:	Descriptor	0,	SegCodeRing3Len-1,	DA_C+DA_32+DA_DPL3
+LABEL_DESC_STACK3:	Descriptor	0,	TopOfStack3,		DA_DRWA+DA_32+DA_DPL3
+
+;门				目标选择子		偏移		Dcount，	 属性
+LABEL_CALL_GATE_TEST:	Gate	SelectorCodeDest,	0,		0,		DA_386CGate+DA_DPL0
 ;GDT结束
 
 
@@ -48,6 +52,9 @@ SelectorCodeDest	equ	LABEL_SEG_CODE_DEST	-LABEL_GDT
 SelectorCallGateTest	equ	LABEL_CALL_GATE_TEST	-LABEL_GDT
 ;LDT
 SelectorLDT		equ	LABEL_DESC_LDT		-LABEL_GDT
+;ring3
+SelectorCodeRing3	equ	LABEL_DESC_CODE_RING3	-LABEL_GDT + SA_RPL3
+SelectorStack3		equ	LABEL_DESC_STACK3	-LABEL_GDT + SA_RPL3
 ;end of [SECTION .gdt]
 
 [SECTION .data1]	;数据段
@@ -182,6 +189,15 @@ LABEL_BEGIN:
 
 
 ;在跳回实模式后，将重置各寄存器的值，恢复sp（堆栈寄存器）的值，关闭A20，打开中断，回到原来的样子
+;堆栈段ring3
+[SECTION .s3]
+ALIGN 32
+[BITS 32]
+LABEL_STACK3:
+	times 512 db 0
+TopOfStack3	equ	$-LABEL_STACK3-1
+;END Of [SECTION .s3]
+
 LABEL_REAL_ENTRY:
 	mov ax,cs
 	mov es,ax
@@ -277,6 +293,21 @@ LABEL_CODE_A:
 	jmp SelectorCode16:0
 CodeALen	equ	$-LABEL_CODE_A
 ;END of [SECTION .la]
+;CodeRing3
+[SECTION .ring3]
+ALIGN 32
+[BITS 32]
+LABEL_CODE_RING32:
+	mov ax,SelectorVideo
+	mov gs,ax
+	mov edi,(80*14+0)*2
+	mov ah,0Ch
+	mov al,'3'
+	mov [gs:edi],ax
+	jmp $
+SegCodeRing3Len	equ	$-LABEL_CODE_RING3
+;END of	[SECTION .ring3]
+
 ;------------------------------------
 TestRead:
 	xor	esi,esi
