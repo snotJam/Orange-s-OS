@@ -1,6 +1,6 @@
 ; ==========================================
-; pmtest4.asm
-; 编译方法：nasm pmtest4.asm -o pmtest4.com
+; pmtest5c.asm
+; 编译方法：nasm pmtest5c.asm -o pmtest5c.com
 ; ==========================================
 
 %include	"pm.inc"	; 常量, 宏, 以及一些说明
@@ -11,18 +11,21 @@ org	0100h
 [SECTION .gdt]
 ; GDT
 ;                           段基址,       段界限     , 属性
-LABEL_GDT:            Descriptor 0,                 0, 0       ; 空描述符
-LABEL_DESC_NORMAL:    Descriptor 0,          0ffffh, DA_DRW    ; Normal 描述符
-LABEL_DESC_CODE32:    Descriptor 0,  SegCode32Len-1, DA_C+DA_32; 非一致代码段,32
-LABEL_DESC_CODE16:    Descriptor 0,          0ffffh, DA_C      ; 非一致代码段,16
-LABEL_DESC_CODE_DEST: Descriptor 0,SegCodeDestLen-1, DA_C+DA_32; 非一致代码段,32
-LABEL_DESC_DATA:      Descriptor 0,       DataLen-1, DA_DRW    ; Data
-LABEL_DESC_STACK:     Descriptor 0,      TopOfStack, DA_DRWA+DA_32;Stack, 32 位
-LABEL_DESC_LDT:       Descriptor 0,        LDTLen-1, DA_LDT    ; LDT
-LABEL_DESC_VIDEO:     Descriptor 0B8000h,    0ffffh, DA_DRW    ; 显存首地址
+LABEL_GDT:             Descriptor 0,                0, 0         ; 空描述符
+LABEL_DESC_NORMAL:     Descriptor 0,           0ffffh, DA_DRW    ; Normal 描述符
+LABEL_DESC_CODE32:     Descriptor 0,   SegCode32Len-1, DA_C+DA_32; 非一致代码段,32
+LABEL_DESC_CODE16:     Descriptor 0,           0ffffh, DA_C      ; 非一致代码段,16
+LABEL_DESC_CODE_DEST:  Descriptor 0, SegCodeDestLen-1, DA_C+DA_32; 非一致代码段,32
+LABEL_DESC_CODE_RING3: Descriptor 0,SegCodeRing3Len-1, DA_C+DA_32+DA_DPL3
+LABEL_DESC_DATA:       Descriptor 0,        DataLen-1, DA_DRW    ; Data	
+LABEL_DESC_STACK:      Descriptor 0,       TopOfStack, DA_DRWA+DA_32;Stack, 32 位
+LABEL_DESC_STACK3:     Descriptor 0,      TopOfStack3, DA_DRWA+DA_32+DA_DPL3
+LABEL_DESC_LDT:        Descriptor 0,         LDTLen-1, DA_LDT    ; LDT
+LABEL_DESC_TSS:        Descriptor 0,          TSSLen-1, DA_386TSS
+LABEL_DESC_VIDEO:      Descriptor 0B8000h,     0ffffh, DA_DRW+DA_DPL3
 
 ; 门                               目标选择子,偏移,DCount, 属性
-LABEL_CALL_GATE_TEST: Gate SelectorCodeDest,   0,     0, DA_386CGate+DA_DPL0
+LABEL_CALL_GATE_TEST: Gate SelectorCodeDest,   0,     0, DA_386CGate+DA_DPL3
 ; GDT 结束
 
 GdtLen		equ	$ - LABEL_GDT	; GDT长度
@@ -34,12 +37,15 @@ SelectorNormal		equ	LABEL_DESC_NORMAL	- LABEL_GDT
 SelectorCode32		equ	LABEL_DESC_CODE32	- LABEL_GDT
 SelectorCode16		equ	LABEL_DESC_CODE16	- LABEL_GDT
 SelectorCodeDest	equ	LABEL_DESC_CODE_DEST	- LABEL_GDT
+SelectorCodeRing3	equ	LABEL_DESC_CODE_RING3	- LABEL_GDT + SA_RPL3
 SelectorData		equ	LABEL_DESC_DATA		- LABEL_GDT
 SelectorStack		equ	LABEL_DESC_STACK	- LABEL_GDT
+SelectorStack3		equ	LABEL_DESC_STACK3	- LABEL_GDT + SA_RPL3
 SelectorLDT		equ	LABEL_DESC_LDT		- LABEL_GDT
+SelectorTSS		equ	LABEL_DESC_TSS		- LABEL_GDT
 SelectorVideo		equ	LABEL_DESC_VIDEO	- LABEL_GDT
 
-SelectorCallGateTest	equ	LABEL_CALL_GATE_TEST	- LABEL_GDT
+SelectorCallGateTest	equ	LABEL_CALL_GATE_TEST	- LABEL_GDT + SA_RPL3
 ; END of [SECTION .gdt]
 
 [SECTION .data1]	 ; 数据段
@@ -66,6 +72,50 @@ LABEL_STACK:
 TopOfStack	equ	$ - LABEL_STACK - 1
 
 ; END of [SECTION .gs]
+
+; 堆栈段ring3
+[SECTION .s3]
+ALIGN	32
+[BITS	32]
+LABEL_STACK3:
+	times 512 db 0
+TopOfStack3	equ	$ - LABEL_STACK3 - 1
+; END of [SECTION .s3]
+
+; TSS
+[SECTION .tss]
+ALIGN	32
+[BITS	32]
+LABEL_TSS:
+		DD	0			; Back
+		DD	TopOfStack		; 0 级堆栈
+		DD	SelectorStack		; 
+		DD	0			; 1 级堆栈
+		DD	0			; 
+		DD	0			; 2 级堆栈
+		DD	0			; 
+		DD	0			; CR3
+		DD	0			; EIP
+		DD	0			; EFLAGS
+		DD	0			; EAX
+		DD	0			; ECX
+		DD	0			; EDX
+		DD	0			; EBX
+		DD	0			; ESP
+		DD	0			; EBP
+		DD	0			; ESI
+		DD	0			; EDI
+		DD	0			; ES
+		DD	0			; CS
+		DD	0			; SS
+		DD	0			; DS
+		DD	0			; FS
+		DD	0			; GS
+		DD	0			; LDT
+		DW	0			; 调试陷阱标志
+		DW	$ - LABEL_TSS + 2	; I/O位图基址
+		DB	0ffh			; I/O位图结束标志
+TSSLen		equ	$ - LABEL_TSS
 
 
 [SECTION .s16]
@@ -130,6 +180,16 @@ LABEL_BEGIN:
 	mov	byte [LABEL_DESC_STACK + 4], al
 	mov	byte [LABEL_DESC_STACK + 7], ah
 
+	; 初始化堆栈段描述符(Ring3)
+	xor	eax, eax
+	mov	ax, ds
+	shl	eax, 4
+	add	eax, LABEL_STACK3
+	mov	word [LABEL_DESC_STACK3 + 2], ax
+	shr	eax, 16
+	mov	byte [LABEL_DESC_STACK3 + 4], al
+	mov	byte [LABEL_DESC_STACK3 + 7], ah
+
 	; 初始化 LDT 在 GDT 中的描述符
 	xor	eax, eax
 	mov	ax, ds
@@ -149,6 +209,26 @@ LABEL_BEGIN:
 	shr	eax, 16
 	mov	byte [LABEL_LDT_DESC_CODEA + 4], al
 	mov	byte [LABEL_LDT_DESC_CODEA + 7], ah
+
+	; 初始化Ring3描述符
+	xor	eax, eax
+	mov	ax, ds
+	shl	eax, 4
+	add	eax, LABEL_CODE_RING3
+	mov	word [LABEL_DESC_CODE_RING3 + 2], ax
+	shr	eax, 16
+	mov	byte [LABEL_DESC_CODE_RING3 + 4], al
+	mov	byte [LABEL_DESC_CODE_RING3 + 7], ah
+
+	; 初始化 TSS 描述符
+	xor	eax, eax
+	mov	ax, ds
+	shl	eax, 4
+	add	eax, LABEL_TSS
+	mov	word [LABEL_DESC_TSS + 2], ax
+	shr	eax, 16
+	mov	byte [LABEL_DESC_TSS + 4], al
+	mov	byte [LABEL_DESC_TSS + 7], ah
 
 	; 为加载 GDTR 作准备
 	xor	eax, eax
@@ -230,6 +310,18 @@ LABEL_SEG_CODE32:
 
 	call	DispReturn
 
+	mov	ax, SelectorTSS
+	;ltr指令从GDT中取出TSS的段描述符，将其描述符信息装载入TR告诉缓寄存器
+	ltr	ax
+	;这里是在当前堆栈中压入值？
+	push	SelectorStack3
+	push	TopOfStack3
+	push	SelectorCodeRing3
+	push	0
+	retf
+
+	ud2	; should never arrive here
+
 	; 测试调用门（无特权级变换），将打印字母 'C'
 	call	SelectorCallGateTest:0
 	;call	SelectorCodeDest:0
@@ -266,7 +358,6 @@ SegCode32Len	equ	$ - LABEL_SEG_CODE32
 [BITS	32]
 
 LABEL_SEG_CODE_DEST:
-	;jmp	$
 	mov	ax, SelectorVideo
 	mov	gs, ax			; 视频段选择子(目的)
 
@@ -274,7 +365,7 @@ LABEL_SEG_CODE_DEST:
 	mov	ah, 0Ch			; 0000: 黑底    1100: 红字
 	mov	al, 'C'
 	mov	[gs:edi], ax
-	;ret/retf都是返回，ret是代码段内转移（短转移）；retf是代码段之间转移（长转移）
+
 	retf
 
 SegCodeDestLen	equ	$ - LABEL_SEG_CODE_DEST
@@ -338,37 +429,54 @@ LABEL_CODE_A:
 CodeALen	equ	$ - LABEL_CODE_A
 ; END of [SECTION .la]
 
-;#############################################################################
-;这是在pmtest3基础上改的一个关于调用门的程序
-;流程：
-;	流程与pmtest3基本是一样的，略有不同的是
-;		1：这次的宏pm.inc中包含了一个Gate的宏，它是一个门描述符，一样存储在GDT中，有自己的选择子。
-;			门描述符与Descriptor不同的是，内部内容不同，那么访问的时候略有不同：
-;			
-;			一般的：Call 选择子-->段描述符索引（变量）-->段描述符-->基址，偏移，属性
-;			调用门：Call 调用门-->门描述符-->段选择子-->段描述符索引-->段描述符-->基址，偏移，属性
-;			也就是调用门的时候先找到门描述符，再根据里面的段选择子地址找到段选择子，再往后执行，多了一步
-;
-;		2：我们在进入保护模式后，32位的代码段中执行了call 门描述符的操作（第234行），顺序为：
-;			SelectorCallGateTest-->LABEL_CALL_GATE_TEST-->SelectorCodeDest-->LABEL_DESC_CODE_DEST--
-;			-->LABEL_SEG_CODE_DEST
-;			retf
-;		
-;		3：在初始化各种描述符的时候，有个堆栈段描述符，通过它能找到一个堆栈。汇编中操作堆栈的时候，是从
-;			高地址向低地址压入，也就是入口在低地址处。压入的越早，地址越高
-;
-;		4: Call指令是影响堆栈的，长调用和短调用的影响不同。
-;			call是短调用的时候，先将参数压入，再压入当前的eip（也就是当前指令地址）;在被调用的代码的
-;			ret指令执行后，堆栈指针回退到压入参数之前的位置
-;			call是长调用的时候，基本与短调用相似，但是压入当前的是cs和eip，不仅仅是eip
-;关键点：
-;	门描述符
-;	代码段转移：比如我在一个代码段中jmp或者call另一个代码段，此时控制权就转移了
-;	长跳转与短跳转：比如调用的代码段是在同一个[SECTION]的，短跳转；是另一个[SECTION]的就是长跳转
-;	堆栈：不同的[SECTION]有不同的堆栈，长跳转就关系到堆栈的变化，转移后堆栈不是同一个
-;	ret/retf 返回指令
-;
+; CodeRing3
+[SECTION .ring3]
+ALIGN	32
+[BITS	32]
+LABEL_CODE_RING3:
+	mov	ax, SelectorVideo
+	mov	gs, ax
 
+	mov	edi, (80 * 14 + 0) * 2
+	mov	ah, 0Ch
+	mov	al, '3'
+	mov	[gs:edi], ax
+
+	call	SelectorCallGateTest:0
+
+	jmp	$
+SegCodeRing3Len	equ	$ - LABEL_CODE_RING3
+; END of [SECTION .ring3]
+;##########################################################################################
+;这是一个关于特权级转移的程序
+;流程：
+;	流程与pmtest4基本一样，略有不同：
+;		1：声明某些描述符的时候，多了TSS，还有一些描述符属性参数中添加了特权级DPL，选择子里面添加了RPL。
+;			特权级由内核到用户是0-3，0表示权限最高。有 CPL，DPL，RPL
+;			CPL表示当前任务权限级别,0和3两个值，表示内核态还是用户态
+;			DPL表示所在段或者门权限级别，存储在描述符的DPL字段
+;			RPL表示选择子特权级，通过选择子第一位表示
+;			需要当前代码段和目标代码段的特权级符合要求，才能访问目标代码段，规则有好几种
+
+;		2：16位代码段中初始化了TSS描述符。实际上每个任务有4个堆栈，对应0-3四个特权级
+;			当前是只有一个堆栈地址ss:esp，那么发生堆栈切换的时候，如果是从低特权级转换到
+;			高特权级，就从TSS中获取另外三个级别的ss和esp
+;		
+;		3：特权级切换的关键在于特权级的比较和传递，call和调用门的时候可以实现低特权级到高特权级
+;			ret是call的反过程，也存在特权级的比较和传递，可以实现高特权级到低特权级
+;
+;		4：有特权级的堆栈切换，我们在pmtest4的详解中介绍了普通堆栈的切换，而这里提到的暂时理解为：
+;			我在call之前的A堆栈中压入了参数和当前的eip，然后执行call后，跳入另一个任务的堆栈B，如果此时的
+;			B任务需要我之前A中的那些参数怎么办？所以就把A堆栈的内容复制到了B堆栈中。而关于特权级的堆栈
+;			需要找TSS
+;
+;关键字：
+;	TSS，特权级，CPL，DPL，RPL
+;	特权级切换
+;	特权级切换与堆栈
+;	call和ret
+;
+;
 
 
 

@@ -1,28 +1,35 @@
 ; ==========================================
-; pmtest7.asm
-; 编译方法：nasm pmtest7.asm -o pmtest7.com
+; pmtest8.asm
+; 编译方法：nasm pmtest8.asm -o pmtest8.com
 ; ==========================================
 
 %include	"pm.inc"	; 常量, 宏, 以及一些说明
 
-PageDirBase		equ	200000h	; 页目录开始地址:	2M
-PageTblBase		equ	201000h	; 页表开始地址:		2M + 4K
+PageDirBase0		equ	200000h	; 页目录开始地址:	2M
+PageTblBase0		equ	201000h	; 页表开始地址:		2M +  4K
+PageDirBase1		equ	210000h	; 页目录开始地址:	2M + 64K
+PageTblBase1		equ	211000h	; 页表开始地址:		2M + 64K + 4K
+
+LinearAddrDemo	equ	00401000h
+ProcFoo		equ	00401000h
+ProcBar		equ	00501000h
+ProcPagingDemo	equ	00301000h
 
 org	0100h
 	jmp	LABEL_BEGIN
 
 [SECTION .gdt]
 ; GDT
-;                                         段基址,       段界限     , 属性
-LABEL_GDT:		Descriptor	       0,                 0, 0			; 空描述符
-LABEL_DESC_NORMAL:	Descriptor	       0,            0ffffh, DA_DRW		; Normal 描述符
-LABEL_DESC_PAGE_DIR:	Descriptor   PageDirBase,              4095, DA_DRW		; Page Directory
-LABEL_DESC_PAGE_TBL:	Descriptor   PageTblBase,      4096 * 8 - 1, DA_DRW		; Page Tables
-LABEL_DESC_CODE32:	Descriptor	       0,  SegCode32Len - 1, DA_C + DA_32	; 非一致代码段, 32
-LABEL_DESC_CODE16:	Descriptor	       0,            0ffffh, DA_C		; 非一致代码段, 16
-LABEL_DESC_DATA:	Descriptor	       0,	DataLen - 1, DA_DRW		; Data
-LABEL_DESC_STACK:	Descriptor	       0,        TopOfStack, DA_DRWA + DA_32	; Stack, 32 位
-LABEL_DESC_VIDEO:	Descriptor	 0B8000h,            0ffffh, DA_DRW		; 显存首地址
+;                           段基址,       段界限, 属性
+LABEL_GDT:          Descriptor 0,              0, 0                      ; 空描述符
+LABEL_DESC_NORMAL:  Descriptor 0,         0ffffh, DA_DRW                 ; Normal 描述符
+LABEL_DESC_FLAT_C:  Descriptor 0,        0fffffh, DA_CR|DA_32|DA_LIMIT_4K; 0~4G
+LABEL_DESC_FLAT_RW: Descriptor 0,        0fffffh, DA_DRW|DA_LIMIT_4K     ; 0~4G
+LABEL_DESC_CODE32:  Descriptor 0, SegCode32Len-1, DA_CR|DA_32            ; 非一致代码段, 32
+LABEL_DESC_CODE16:  Descriptor 0,         0ffffh, DA_C                   ; 非一致代码段, 16
+LABEL_DESC_DATA:    Descriptor 0,      DataLen-1, DA_DRW                 ; Data
+LABEL_DESC_STACK:   Descriptor 0,     TopOfStack, DA_DRWA|DA_32          ; Stack, 32 位
+LABEL_DESC_VIDEO:   Descriptor 0B8000h,   0ffffh, DA_DRW                 ; 显存首地址
 ; GDT 结束
 
 GdtLen		equ	$ - LABEL_GDT	; GDT长度
@@ -31,8 +38,8 @@ GdtPtr		dw	GdtLen - 1	; GDT界限
 
 ; GDT 选择子
 SelectorNormal		equ	LABEL_DESC_NORMAL	- LABEL_GDT
-SelectorPageDir		equ	LABEL_DESC_PAGE_DIR	- LABEL_GDT
-SelectorPageTbl		equ	LABEL_DESC_PAGE_TBL	- LABEL_GDT
+SelectorFlatC		equ	LABEL_DESC_FLAT_C	- LABEL_GDT
+SelectorFlatRW		equ	LABEL_DESC_FLAT_RW	- LABEL_GDT
 SelectorCode32		equ	LABEL_DESC_CODE32	- LABEL_GDT
 SelectorCode16		equ	LABEL_DESC_CODE16	- LABEL_GDT
 SelectorData		equ	LABEL_DESC_DATA		- LABEL_GDT
@@ -61,6 +68,7 @@ _ARDStruct:			; Address Range Descriptor Structure
 	_dwLengthLow:		dd	0
 	_dwLengthHigh:		dd	0
 	_dwType:		dd	0
+_PageTableNumber		dd	0
 
 _MemChkBuf:	times	256	db	0
 
@@ -79,6 +87,7 @@ ARDStruct		equ	_ARDStruct	- $$
 	dwLengthHigh	equ	_dwLengthHigh	- $$
 	dwType		equ	_dwType		- $$
 MemChkBuf		equ	_MemChkBuf	- $$
+PageTableNumber		equ	_PageTableNumber- $$
 
 DataLen			equ	$ - LABEL_DATA
 ; END of [SECTION .data1]
@@ -115,7 +124,6 @@ LABEL_BEGIN:
 	mov	eax, 0E820h
 	mov	ecx, 20
 	mov	edx, 0534D4150h
-	;中断15h的方式获取内存大小
 	int	15h
 	jc	LABEL_MEM_CHK_FAIL
 	add	di, 20
@@ -220,7 +228,6 @@ LABEL_REAL_ENTRY:		; 从保护模式跳回到实模式就到了这里
 LABEL_SEG_CODE32:
 	mov	ax, SelectorData
 	mov	ds, ax			; 数据段选择子
-	mov	ax, SelectorData
 	mov	es, ax
 	mov	ax, SelectorVideo
 	mov	gs, ax			; 视频段选择子
@@ -242,7 +249,7 @@ LABEL_SEG_CODE32:
 
 	call	DispMemSize		; 显示内存信息
 
-	call	SetupPaging		; 启动分页机制
+	call	PagingDemo		; 演示改变页目录的效果
 
 	; 到此停止
 	jmp	SelectorCode16:0
@@ -251,41 +258,35 @@ LABEL_SEG_CODE32:
 SetupPaging:
 	; 根据内存大小计算应初始化多少PDE以及多少页表
 	xor	edx, edx
-	;eax = 内存大小
 	mov	eax, [dwMemSize]
-	;ebx = 4M 页表大小
 	mov	ebx, 400000h	; 400000h = 4M = 4096 * 1024, 一个页表对应的内存大小
-	;div 除法运算指令，按照逻辑，后面是被除数，结果的商存放在al中，余数在ah中
-	;因为此时是32位模式，所以结果存放位置是eax
 	div	ebx
 	mov	ecx, eax	; 此时 ecx 为页表的个数，也即 PDE 应该的个数
 	test	edx, edx
 	jz	.no_remainder
 	inc	ecx		; 如果余数不为 0 就需增加一个页表
 .no_remainder:
-	push	ecx		; 暂存页表个数
+	mov	[PageTableNumber], ecx	; 暂存页表个数
 
 	; 为简化处理, 所有线性地址对应相等的物理地址. 并且不考虑内存空洞.
 
 	; 首先初始化页目录
-	mov	ax, SelectorPageDir	; 此段首地址为 PageDirBase
+	mov	ax, SelectorFlatRW
 	mov	es, ax
-	xor	edi, edi
+	mov	edi, PageDirBase0	; 此段首地址为 PageDirBase0
 	xor	eax, eax
-	mov	eax, PageTblBase | PG_P  | PG_USU | PG_RWW
+	mov	eax, PageTblBase0 | PG_P  | PG_USU | PG_RWW
 .1:
 	stosd
 	add	eax, 4096		; 为了简化, 所有页表在内存中是连续的.
 	loop	.1
 
 	; 再初始化所有页表
-	mov	ax, SelectorPageTbl	; 此段首地址为 PageTblBase
-	mov	es, ax
-	pop	eax			; 页表个数
+	mov	eax, [PageTableNumber]	; 页表个数
 	mov	ebx, 1024		; 每个页表 1024 个 PTE
 	mul	ebx
 	mov	ecx, eax		; PTE个数 = 页表个数 * 1024
-	xor	edi, edi
+	mov	edi, PageTblBase0	; 此段首地址为 PageTblBase0
 	xor	eax, eax
 	mov	eax, PG_P  | PG_USU | PG_RWW
 .2:
@@ -293,7 +294,7 @@ SetupPaging:
 	add	eax, 4096		; 每一页指向 4K 的空间
 	loop	.2
 
-	mov	eax, PageDirBase
+	mov	eax, PageDirBase0
 	mov	cr3, eax
 	mov	eax, cr0
 	or	eax, 80000000h
@@ -306,50 +307,174 @@ SetupPaging:
 ; 分页机制启动完毕 ----------------------------------------------------------
 
 
+; 测试分页机制 --------------------------------------------------------------
+PagingDemo:
+	mov	ax, cs
+	mov	ds, ax
+	mov	ax, SelectorFlatRW
+	mov	es, ax
 
+	push	LenFoo
+	push	OffsetFoo
+	push	ProcFoo
+	call	MemCpy
+	add	esp, 12
+
+	push	LenBar
+	push	OffsetBar
+	push	ProcBar
+	call	MemCpy
+	add	esp, 12
+
+	push	LenPagingDemoAll
+	push	OffsetPagingDemoProc
+	push	ProcPagingDemo
+	call	MemCpy
+	add	esp, 12
+
+	mov	ax, SelectorData
+	mov	ds, ax			; 数据段选择子
+	mov	es, ax
+
+	call	SetupPaging		; 启动分页
+
+	call	SelectorFlatC:ProcPagingDemo
+	call	PSwitch			; 切换页目录，改变地址映射关系
+	call	SelectorFlatC:ProcPagingDemo
+
+	ret
+; ---------------------------------------------------------------------------
+
+
+; 切换页表 ------------------------------------------------------------------
+PSwitch:
+	; 初始化页目录
+	mov	ax, SelectorFlatRW
+	mov	es, ax
+	mov	edi, PageDirBase1	; 此段首地址为 PageDirBase1
+	xor	eax, eax
+	mov	eax, PageTblBase1 | PG_P  | PG_USU | PG_RWW
+	mov	ecx, [PageTableNumber]
+.1:
+	stosd
+	add	eax, 4096		; 为了简化, 所有页表在内存中是连续的.
+	loop	.1
+
+	; 再初始化所有页表
+	mov	eax, [PageTableNumber]	; 页表个数
+	mov	ebx, 1024		; 每个页表 1024 个 PTE
+	mul	ebx
+	mov	ecx, eax		; PTE个数 = 页表个数 * 1024
+	mov	edi, PageTblBase1	; 此段首地址为 PageTblBase1
+	xor	eax, eax
+	mov	eax, PG_P  | PG_USU | PG_RWW
+.2:
+	stosd
+	add	eax, 4096		; 每一页指向 4K 的空间
+	loop	.2
+
+	; 在此假设内存是大于 8M 的
+	mov	eax, LinearAddrDemo
+	shr	eax, 22
+	mov	ebx, 4096
+	mul	ebx
+	mov	ecx, eax
+	mov	eax, LinearAddrDemo
+	shr	eax, 12
+	and	eax, 03FFh	; 1111111111b (10 bits)
+	mov	ebx, 4
+	mul	ebx
+	add	eax, ecx
+	add	eax, PageTblBase1
+	mov	dword [es:eax], ProcBar | PG_P | PG_USU | PG_RWW
+
+	mov	eax, PageDirBase1
+	mov	cr3, eax
+	jmp	short .3
+.3:
+	nop
+
+	ret
+; ---------------------------------------------------------------------------
+
+
+
+PagingDemoProc:
+OffsetPagingDemoProc	equ	PagingDemoProc - $$
+	mov	eax, LinearAddrDemo
+	call	eax
+	retf
+LenPagingDemoAll	equ	$ - PagingDemoProc
+
+foo:
+OffsetFoo		equ	foo - $$
+	mov	ah, 0Ch			; 0000: 黑底    1100: 红字
+	mov	al, 'F'
+	mov	[gs:((80 * 17 + 0) * 2)], ax	; 屏幕第 17 行, 第 0 列。
+	mov	al, 'o'
+	mov	[gs:((80 * 17 + 1) * 2)], ax	; 屏幕第 17 行, 第 1 列。
+	mov	[gs:((80 * 17 + 2) * 2)], ax	; 屏幕第 17 行, 第 2 列。
+	ret
+LenFoo			equ	$ - foo
+
+bar:
+OffsetBar		equ	bar - $$
+	mov	ah, 0Ch			; 0000: 黑底    1100: 红字
+	mov	al, 'B'
+	mov	[gs:((80 * 18 + 0) * 2)], ax	; 屏幕第 18 行, 第 0 列。
+	mov	al, 'a'
+	mov	[gs:((80 * 18 + 1) * 2)], ax	; 屏幕第 18 行, 第 1 列。
+	mov	al, 'r'
+	mov	[gs:((80 * 18 + 2) * 2)], ax	; 屏幕第 18 行, 第 2 列。
+	ret
+LenBar			equ	$ - bar
+
+
+; 显示内存信息 --------------------------------------------------------------
 DispMemSize:
 	push	esi
 	push	edi
 	push	ecx
 
 	mov	esi, MemChkBuf
-	mov	ecx, [dwMCRNumber];for(int i=0;i<[MCRNumber];i++)//每次得到一个ARDS
-.loop:				  ;{
-	mov	edx, 5		  ;  for(int j=0;j<5;j++) //每次得到一个ARDS中的成员
-	mov	edi, ARDStruct	  ;  {//依次显示BaseAddrLow,BaseAddrHigh,LengthLow,
-.1:				  ;             LengthHigh,Type
-	push	dword [esi]	  ;
-	call	DispInt		  ;    DispInt(MemChkBuf[j*4]); //显示一个成员
-	pop	eax		  ;
-	stosd			  ;    ARDStruct[j*4] = MemChkBuf[j*4];
-	add	esi, 4		  ;
-	dec	edx		  ;
-	cmp	edx, 0		  ;
-	jnz	.1		  ;  }
-	call	DispReturn	  ;  printf("\n");
-	cmp	dword [dwType], 1 ;  if(Type == AddressRangeMemory)
-	jne	.2		  ;  {
-	mov	eax, [dwBaseAddrLow];
-	add	eax, [dwLengthLow];
-	cmp	eax, [dwMemSize]  ;    if(BaseAddrLow + LengthLow > MemSize)
-	jb	.2		  ;
-	mov	[dwMemSize], eax  ;    MemSize = BaseAddrLow + LengthLow;
-.2:				  ;  }
-	loop	.loop		  ;}
-				  ;
-	call	DispReturn	  ;printf("\n");
-	push	szRAMSize	  ;
-	call	DispStr		  ;printf("RAM size:");
-	add	esp, 4		  ;
-				  ;
-	push	dword [dwMemSize] ;
-	call	DispInt		  ;DispInt(MemSize);
-	add	esp, 4		  ;
+	mov	ecx, [dwMCRNumber]	;for(int i=0;i<[MCRNumber];i++) // 每次得到一个ARDS(Address Range Descriptor Structure)结构
+.loop:					;{
+	mov	edx, 5			;	for(int j=0;j<5;j++)	// 每次得到一个ARDS中的成员，共5个成员
+	mov	edi, ARDStruct		;	{			// 依次显示：BaseAddrLow，BaseAddrHigh，LengthLow，LengthHigh，Type
+.1:					;
+	push	dword [esi]		;
+	call	DispInt			;		DispInt(MemChkBuf[j*4]); // 显示一个成员
+	pop	eax			;
+	stosd				;		ARDStruct[j*4] = MemChkBuf[j*4];
+	add	esi, 4			;
+	dec	edx			;
+	cmp	edx, 0			;
+	jnz	.1			;	}
+	call	DispReturn		;	printf("\n");
+	cmp	dword [dwType], 1	;	if(Type == AddressRangeMemory) // AddressRangeMemory : 1, AddressRangeReserved : 2
+	jne	.2			;	{
+	mov	eax, [dwBaseAddrLow]	;
+	add	eax, [dwLengthLow]	;
+	cmp	eax, [dwMemSize]	;		if(BaseAddrLow + LengthLow > MemSize)
+	jb	.2			;
+	mov	[dwMemSize], eax	;			MemSize = BaseAddrLow + LengthLow;
+.2:					;	}
+	loop	.loop			;}
+					;
+	call	DispReturn		;printf("\n");
+	push	szRAMSize		;
+	call	DispStr			;printf("RAM size:");
+	add	esp, 4			;
+					;
+	push	dword [dwMemSize]	;
+	call	DispInt			;DispInt(MemSize);
+	add	esp, 4			;
 
 	pop	ecx
 	pop	edi
 	pop	esi
 	ret
+; ---------------------------------------------------------------------------
 
 %include	"lib.inc"	; 库函数
 
@@ -380,22 +505,22 @@ LABEL_GO_BACK_TO_REAL:
 Code16Len	equ	$ - LABEL_SEG_CODE16
 
 ; END of [SECTION .s16code]
-;################################################################################################
-;这是一个获取内存大小，根据内存设置分页机制的程序
+;###############################################################################
+;这是一个关于分页切换的程序
 ;流程：
-;	和pmtest6是基本一致的，关键区别在于：
-;	1：定义了不少关于内存信息的变量
-;	
-;	2：16位代码段中，在初始各种段描述符之前，先使用中断15h的方式获取到了内存的大小，然后再进行初始化
-;		描述符，加载GDT，A20等，最后切换模式，进入32位代码段
+;	流程还是和pmtest7基本一致的，不同的在于
+;	1：这里声明了两组页表
 ;
-;	3：32位代码段中先显示了内存信息，然后再启动了分页机制，分页机制中先根据前面获取的内存大小，计算了
-;		要初始化的PDE和PTE的个数，然后再根据个数进行初始化页目录和页表
+;	2：32位代码段中不是直接call 启动分页了，而是以下流程：
+;		call PagingDemo	-->call	SetupPaging 启动分页，初始化第一组页表 此时cr3指向Base0 --
+;		--> call SelectorFlatC:ProcPagingDemo --> PagingDemoProc --> LinearAddrDemo --
+;		--> foo （到此屏幕显示字符串"foo"，使用页表为第一组）--> retf --
+;		-->	PSwitch 切换页表，初始化第二组页表，cr3指向Base0 --> call	SelectorFlatC:ProcPagingDemo--
+;		--> PagingDemoProc --> LinearAddrDemo --> bar（到此屏幕显示字符串"bar"，使用页表为第二组）
+;		至此完成页表切换演示
 ;
-;	（pmtest6的方式是固定4M大小页表映射4G物理内存，那么如果遇到16M大小的物理内存，4M页表就太浪费了
-;		所以要根据内存大小计算需要多少页表。我们知道1页是4KB，一个页表有1024页，是4M，那么16M只需要
-;		4个页表）
-;关键字
-;	中断15h
-;	
+;关键字：
+;	多“页表”
+;	cr3
+;
 ;

@@ -1,68 +1,68 @@
-;------------------------------------------------
-;这段代码是在pmtest2上面修改了一部分
-;用于测试初始化分页机制
-;-------------------------------------------
-%include "pm.inc"		;常量，宏，以及一些说明
+; ==========================================
+; pmtest6.asm
+; 编译方法：nasm pmtest6.asm -o pmtest6.com
+; ==========================================
 
-org 0100h
-	jmp LABEL_BEGIN
-	
-PageDirBase		equ 	200000h		;页目录开始地址
-PageTblBase		equ		201000h		;页表开始地址
+%include	"pm.inc"	; 常量, 宏, 以及一些说明
+
+PageDirBase		equ	200000h	; 页目录开始地址: 2M
+PageTblBase		equ	201000h	; 页表开始地址: 2M+4K
+
+org	0100h
+	jmp	LABEL_BEGIN
+
 [SECTION .gdt]
-;GDT
-;									段地址		段界限		  	属性
-LABEL_GDT:			Descriptor			0,			0,			0		;空描述符
-LABEL_NORMAL:		Descriptor			0,		0ffffh,			DA_DRW		;Normal描述符
-LABEL_DESC_CODE32:	Descriptor			0,	SegCode32Len-1,		DA_C+DA_32	;非一致代码段 32
-LABEL_DESC_CODE16:	Descriptor			0,		0ffffh,			DA_C		;非一致代码段 16
-LABEL_DESC_DATA:	Descriptor			0,		DataLen-1,		DA_DRW		;Data
-LABEL_DESC_STACK:	Descriptor			0,		TopOfStack,		DA_DRWA+DA_32	;stack 32位
-LABEL_DESC_TEST:	Descriptor		05000000h,	0ffffh,			DA_DRW
-LABEL_DESC_VIDEO:	Descriptor	  	0B8000h,	0ffffh,			DA_DRW		;显存首地址
-;页地址
-LABEL_DESC_PAGE_DIR:	Descriptor	PageDirBase, 4095,			DA_DRW		;Page Directory
-LABEL_DESC_PAGE_TBL:	Descriptor	PageTblBase, 1023,			DA_DRW|DA_LIMIT_4K	;Page Tables
-;GDT结束
+; GDT
+;                            段基址,       段界限, 属性
+LABEL_GDT:           Descriptor 0,              0, 0     		; 空描述符
+LABEL_DESC_NORMAL:   Descriptor 0,         0ffffh, DA_DRW		; Normal 描述符
+LABEL_DESC_PAGE_DIR: Descriptor PageDirBase, 4095, DA_DRW;Page Directory
+LABEL_DESC_PAGE_TBL: Descriptor PageTblBase, 1023, DA_DRW|DA_LIMIT_4K;Page Tables
+LABEL_DESC_CODE32:   Descriptor 0, SegCode32Len-1, DA_C+DA_32		; 非一致代码段, 32
+LABEL_DESC_CODE16:   Descriptor 0,         0ffffh, DA_C			; 非一致代码段, 16
+LABEL_DESC_DATA:     Descriptor 0,      DataLen-1, DA_DRW		; Data
+LABEL_DESC_STACK:    Descriptor 0,     TopOfStack, DA_DRWA + DA_32	; Stack, 32 位
+LABEL_DESC_VIDEO:    Descriptor 0B8000h,   0ffffh, DA_DRW		; 显存首地址
+; GDT 结束
 
-GdtLen	equ	$-LABEL_GDT		;GDT长度
-GdtPtr	dw	GdtLen-1		;GDT界限
-		dd	0				;GDT基地址
+GdtLen		equ	$ - LABEL_GDT	; GDT长度
+GdtPtr		dw	GdtLen - 1	; GDT界限
+		dd	0		; GDT基地址
 
-;GDT选择子
-SelectorNormal	equ	LABEL_DESC_CODE32	-LABEL_GDT
-SelectorCode32	equ	LABEL_DESC_CODE32	-LABEL_GDT
-SelectorCode16	equ	LABEL_DESC_CODE16	-LABEL_GDT
-SelectorData	equ	LABEL_DESC_DATA		-LABEL_GDT
-SelectorStack	equ	LABEL_DESC_STACK	-LABEL_GDT
-SelectorTest	equ	LABEL_DESC_TEST		-LABEL_GDT
-SelectorVideo	equ	LABEL_DESC_VIDEO	-LABEL_GDT
-;页表的
-SelectorPageDir	equ	LABEL_DESC_PAGE_DIR	-LABEL_GDT
-SelectorPageTbl	equ	LABEL_DESC_PAGE_TBL	-LABEL_GDT
-;end of [SECTION .gdt]
+; GDT 选择子
+SelectorNormal		equ	LABEL_DESC_NORMAL	- LABEL_GDT
+SelectorPageDir		equ	LABEL_DESC_PAGE_DIR	- LABEL_GDT
+SelectorPageTbl		equ	LABEL_DESC_PAGE_TBL	- LABEL_GDT
+SelectorCode32		equ	LABEL_DESC_CODE32	- LABEL_GDT
+SelectorCode16		equ	LABEL_DESC_CODE16	- LABEL_GDT
+SelectorData		equ	LABEL_DESC_DATA		- LABEL_GDT
+SelectorStack		equ	LABEL_DESC_STACK	- LABEL_GDT
+SelectorVideo		equ	LABEL_DESC_VIDEO	- LABEL_GDT
+; END of [SECTION .gdt]
 
-[SECTION .data1]	;数据段
-	ALIGN	32
-	[BIT 32]
-	LABEL_DATA:
-		SPValueInRealMode	dw	0
-		;字符串
-		PMMessage:			db "In Project Mode now ^-^", 0		;在保护模式中显示
-		OffsetPMMessage		equ	PMMessage-$$
-		StrTest:			db	"ABCDEFGHIJKLMN",0
-		OffsetStrTest		equ	StrTest-$$
-		DataLen				equ	$-LABEL_DATA
-;END of [SECTION .data1]
+[SECTION .data1]	 ; 数据段
+ALIGN	32
+[BITS	32]
+LABEL_DATA:
+SPValueInRealMode	dw	0
+; 字符串
+PMMessage:		db	"In Protect Mode now. ^-^", 0	; 进入保护模式后显示此字符串
+OffsetPMMessage		equ	PMMessage - $$
+DataLen			equ	$ - LABEL_DATA
+; END of [SECTION .data1]
 
-;全局堆栈段
-[SECTION .gs]		
-	ALIGN	32
-	[BIT 32]
-	LABEL_STACK:
-		times 512 db 0
-	TopOfStack		equ 	$-LABEL_STACK-1
-;END of [SECTION .gs]
+
+; 全局堆栈段
+[SECTION .gs]
+ALIGN	32
+[BITS	32]
+LABEL_STACK:
+	times 512 db 0
+
+TopOfStack	equ	$ - LABEL_STACK - 1
+
+; END of [SECTION .gs]
+
 
 [SECTION .s16]
 [BITS	16]
@@ -73,10 +73,7 @@ LABEL_BEGIN:
 	mov	ss, ax
 	mov	sp, 0100h
 
-	mov	[LABEL_GO_BACK_TO_REAL+3], ax	;LABEL_GO_BACK_TO_REAL+3刚好是Segment的地址
-										;此处先将cs值给了ax，最后又将ax中的值给了Segment，也就是此时segment地址为cs值
-										;那么代码jmp 0,LABEL_REAL_ENTRY就变成了jmp cs_real_mode:LABEL_REAL_ENTRY
-										;将跳到标号LABEL_REAL_ENTRY处
+	mov	[LABEL_GO_BACK_TO_REAL+3], ax
 	mov	[SPValueInRealMode], sp
 
 	; 初始化 16 位代码段描述符
@@ -144,216 +141,146 @@ LABEL_BEGIN:
 
 	; 真正进入保护模式
 	jmp	dword SelectorCode32:0	; 执行这一句会把 SelectorCode32 装入 cs, 并跳转到 Code32Selector:0  处
-											
+
+;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+
+LABEL_REAL_ENTRY:		; 从保护模式跳回到实模式就到了这里
+	mov	ax, cs
+	mov	ds, ax
+	mov	es, ax
+	mov	ss, ax
+
+	mov	sp, [SPValueInRealMode]
+
+	in	al, 92h		; ┓
+	and	al, 11111101b	; ┣ 关闭 A20 地址线
+	out	92h, al		; ┛
+
+	sti			; 开中断
+
+	mov	ax, 4c00h	; ┓
+	int	21h		; ┛回到 DOS
+; END of [SECTION .s16]
 
 
-;在跳回实模式后，将重置各寄存器的值，恢复sp（堆栈寄存器）的值，关闭A20，打开中断，回到原来的样子
-LABEL_REAL_ENTRY:
-	mov ax,cs
-	mov es,ax
-	mov ss,ax
-	mov ds,ax
-	
-	mov sp,[SPValueInRealMode]
-	
-	in al,92h
-	and al,11111101b	;关闭A20地址线
-	out 92h,al
-	
-	sti					;打开中断
-	mov ax,4c00h
-	int 21h				;回到DOS
-	
-;32位代码段
-[SECTION .s32]		
-[BITS 32]
+[SECTION .s32]; 32 位代码段. 由实模式跳入.
+[BITS	32]
+
 LABEL_SEG_CODE32:
-	mov ax,SelectorData		;mov指令将数据从后者传递到前者
-	mov ds,ax
-	mov ax,SelectorTest
-	mov es,ax
-	mov ax,SelectorVideo
-	mov gs,ax
-	mov ax,SelectorStack
-	mov ss,ax
-	mov esp,TopOfStack
-	;通过上面这段代码，ds是数据段寄存器，es，gs是附加段寄存器，ss是堆栈段寄存器，我们发现不能直接通过mov指令传递
-	;数据到前面的寄存器，要先通过ax。通用寄存器有ax,bx,cx,dx
-	
-	;下面显示一个字符串
-	mov ah,0Ch
-	xor	esi,esi
-	xor edi,edi
-	mov esi,OffsetPMMessage		;数据源偏移
-	mov edi,(80*10+0)*2			;目的数据源偏移，屏幕第10行，第0列
+	call	SetupPaging
+
+	mov	ax, SelectorData
+	mov	ds, ax			; 数据段选择子
+	mov	ax, SelectorVideo
+	mov	gs, ax			; 视频段选择子
+
+	mov	ax, SelectorStack
+	mov	ss, ax			; 堆栈段选择子
+
+	mov	esp, TopOfStack
+
+
+	; 下面显示一个字符串
+	mov	ah, 0Ch			; 0000: 黑底    1100: 红字
+	xor	esi, esi
+	xor	edi, edi
+	mov	esi, OffsetPMMessage	; 源数据偏移
+	mov	edi, (80 * 10 + 0) * 2	; 目的数据偏移。屏幕第 10 行, 第 0 列。
+	cld
 .1:
 	lodsb
-	test	al,al
+	test	al, al
 	jz	.2
-	mov	[gs:edi],ax
-	add edi,2
-	jmp .1
-.2:			;显示完毕
-	;call DispReturn
-	;call TestRead
-	;call TestWrite
-	;call TestRead
-	
-	;到此停止
-	jmp SelectorCode16:0		;跳到.s16Code
-;------------------------------------
+	mov	[gs:edi], ax
+	add	edi, 2
+	jmp	.1
+.2:	; 显示完毕
 
-;------------------------------------------
-;启动分页机制
+	; 到此停止
+	jmp	SelectorCode16:0
+
+; 启动分页机制 --------------------------------------------------------------
 SetupPaging:
-	;为简化处理，所有线性地址对应相等的物理地址
-	;首先初始化页目录
-	mov ax,SelectorPageDir
-	mov es,ax				;到这里，ex对应页目录表段
-	mov ecx,1024
-	xor edi,edi
-	xor eax,eax
-	mov eax,PageTblBase| PG_P | PG_USU | PG_RWW		;这里可以说设置了第一个PageTblBase的属性
+	; 为简化处理, 所有线性地址对应相等的物理地址.
+
+	; 首先初始化页目录
+	mov	ax, SelectorPageDir	; 此段首地址为 PageDirBase
+	mov	es, ax
+	mov	ecx, 1024		; 共 1K 个表项
+	xor	edi, edi
+	xor	eax, eax
+	mov	eax, PageTblBase | PG_P  | PG_USU | PG_RWW
 .1:
-	stosd		;这个指令执行的时候，将eax中的PageTblBae PG_P | PG_USU | PG_RWW存入页目录表的第一个PDE、
-				;当为第一个PDE赋值的时候，一个循环就开始了，循环的每一次，es:edi都指向下一个PDE
-	add eax,4096	;将下一个页表的首地址增加了4096字节，以便与上一个页表首位相接。
-					;经过1024次循环，将所有PDE赋值
-	loop .1
-	
-	;再初始化所有页表
-	mov ax,SelectorPageTbl	;同上，上面的是PDE赋值，那么这里就是PTE的赋值
-	mov es,ax
-	mov ecx,1024*1024
-	xor edi,edi
-	xor eax,eax
-	mov eax,PG_P | PG_USU | PG_RWW
-.2
 	stosd
-	add eax,4096
-	loop .2
-	
-	mov eax,PageDirBase
-	mov cr3,eax			;首先让cr3指向页表目录
-	mov eax,cr0			;设置cr0的PG，启动分页机制
-	or eax,80000000h
-	mov cr0,eax
-	jmp short .3
-.3
+	add	eax, 4096		; 为了简化, 所有页表在内存中是连续的.
+	loop	.1
+
+	; 再初始化所有页表 (1K 个, 4M 内存空间)
+	mov	ax, SelectorPageTbl	; 此段首地址为 PageTblBase
+	mov	es, ax
+	mov	ecx, 1024 * 1024	; 共 1M 个页表项, 也即有 1M 个页
+	xor	edi, edi
+	xor	eax, eax
+	mov	eax, PG_P  | PG_USU | PG_RWW
+.2:
+	stosd
+	add	eax, 4096		; 每一页指向 4K 的空间
+	loop	.2
+	;cr3指向页目录地址
+	mov	eax, PageDirBase
+	mov	cr3, eax
+	mov	eax, cr0
+	or	eax, 80000000h
+	mov	cr0, eax
+	jmp	short .3
+.3:
 	nop
-	
-	ret
-;分页基址启动完毕
 
-;------------------------------------------
+	ret
+; 分页机制启动完毕 ----------------------------------------------------------
 
-TestRead:
-	xor	esi,esi
-	mov ecx,8
-.loop:
-	mov al,[es:esi]
-	call	DispAL
-	inc esi
-	loop .loop
-	call	DispReturn
-	ret
-;TestRead结束
+SegCode32Len	equ	$ - LABEL_SEG_CODE32
+; END of [SECTION .s32]
 
-;------------------------------------
-TestWrite:
-	push	esi
-	push	edi
-	xor	esi,esi
-	xor	edi,edi
-	mov esi,OffsetStrTest
-.1:
-	lodsb
-	test	al,al
-	jz	.2
-	mov	[es:edi],al
-	inc edi
-	jmp .1
-	
-.2:
-	pop	edi
-	pop	esi
-	
-	ret
-;TestWrite结束
-;-----------------------------------------
-;显示AL中的数字
-;默认的
-;	数字已经存在al中
-;	edi始终指向要显示的下一个字符的位置
-;被改变的寄存器
-;	ax,edi
-;---------------------------------------------
-DispAL:
-	push ecx
-	push edx
-	
-	mov ah,0Ch
-	mov dl,al
-	mov al,4
-	mov ecx,2
-.begin:
-	and al,01111b
-	cmp	al,9
-	ja	.1
-	add	al,'0'
-	jmp .2
-.1:
-	sub	al,0Ah
-	add al,'A'
-.2:
-	mov [gs:edi],ax
-	add edi,2
-	
-	mov al,dl
-	loop .begin
-	add edi,2
-	pop edx
-	pop ecx
-	
-	ret
-;DispAL结束---------------
-;------------------------------------------------
-DispReturn:
-	push eax
-	push ebx
-	mov eax,edi
-	mov bl,160
-	div bl
-	and	eax,0FFh
-	inc eax
-	mov bl,160
-	mul bl
-	mov edi,eax
-	pop	ebx
-	pop eax
-	
-	ret
-;DispReturn结束----------------------
 
+; 16 位代码段. 由 32 位代码段跳入, 跳出后到实模式
 [SECTION .s16code]
-ALIGN 32
-[BITS 16]
+ALIGN	32
+[BITS	16]
 LABEL_SEG_CODE16:
-	;跳回实模式
-	mov ax,SelectorNormal
-	mov ds,ax
-	mov es,ax
-	mov fs,ax
-	mov gs,ax
-	mov ss,ax
-	
-	mov eax,cr0			;这里清除了cr0的PE位，表示实模式
-	and al,11111110b
-	mov cr0,eax
-	
-LABEL_GO_BACK_TO_REAL:
-	jmp 0:LABEL_REAL_ENTRY		;段地址在程序开始处被设置为正确的值
-Code16Len	equ		$-LABEL_SEG_CODE16
-;END OF [SECTION .s16Code]
+	; 跳回实模式:
+	mov	ax, SelectorNormal
+	mov	ds, ax
+	mov	es, ax
+	mov	fs, ax
+	mov	gs, ax
+	mov	ss, ax
 
-	
+	mov	eax, cr0
+	and	eax, 7FFFFFFEh		; PE=0, PG=0
+	mov	cr0, eax
+
+LABEL_GO_BACK_TO_REAL:
+	jmp	0:LABEL_REAL_ENTRY	; 段地址会在程序开始处被设置成正确的值
+
+Code16Len	equ	$ - LABEL_SEG_CODE16
+
+; END of [SECTION .s16code]
+;###########################################################################
+;这是一个关于分页机制的程序
+;流程：
+;	1：与前面不同的，是就定义了页目录和页表的起始地址，然后才进入jmp LABEL_BEGIN
+;
+;	2：在GDT中定义了页目录和页表的段描述符，基地址就是前面定义的起始地址。同样有Selector
+;
+;	3：接下来和前面一样，进入16位代码段，初始化各种描述符，切换保护模式，进入32位代码段，进入32位
+;		代码段之后，先执行了call SetupPaging启动了分页机制
+;
+;	4：分页机制中初始化页目录，初始化页表，使每一个页指向一个4K大小的物理地址。设置cr3指向页目录地址
+;		最后ret。
+;
+;	5：分页机制返回后，继续32位的其他操作
+;关键字：
+;	页目录，页表(PDE)，页(PTE)，映射到物理地址	
+;	线性地址通过页表机制映射到物理地址
+;	cr3与页目录地址
